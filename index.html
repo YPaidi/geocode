@@ -57,6 +57,9 @@
 
     const $ = (id) => document.getElementById(id);
     const statusEl = $('status');
+    // Show file picker only when running locally (file:// or localhost)
+    const IS_LOCAL = (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+    const ENABLE_FILE_PICKER = IS_LOCAL;
 
     function colorByDecade(year){
       if(!year) return '#666';
@@ -205,8 +208,8 @@
         statusEl.textContent = `Loaded ${parsed.data.length} rows.`;
       } catch (err) {
         console.error(err);
-        statusEl.textContent = 'Could not load data.csv. You can choose a CSV manually.';
-        $('file').classList.remove('hidden');
+        statusEl.textContent = 'Could not load data.csv.';
+        if (ENABLE_FILE_PICKER) $('file').classList.remove('hidden');
       }
     }
 
@@ -227,7 +230,13 @@
     $('btnReload').addEventListener('click', loadCSVFromServer);
 
     // Initial load
-    loadCSVFromServer();
+    if (ENABLE_FILE_PICKER && location.protocol === 'file:') {
+      statusEl.textContent = 'Opened from file:// — use “Choose File” or run a local server.';
+      $('file').classList.remove('hidden');
+    } else {
+      loadCSVFromServer();
+    }
+    }
   </script>
 </body>
 </html>
