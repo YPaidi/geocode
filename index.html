@@ -155,25 +155,33 @@
     const REQUIRED_COLUMNS = ["Company Name","YearEstablished","Latitude","Longitude"]; // soft-checked
 
     function pick(obj, keys){
-      for(const k of keys){ if(Object.prototype.hasOwnProperty.call(obj, k)) return obj[k]; }
+      // first try direct names
+      for (const k of keys) { if (Object.prototype.hasOwnProperty.call(obj, k)) return obj[k]; }
+      // then try case-insensitive / trimmed header names (handles Excel BOM/extra spaces)
+      const map = {}; Object.keys(obj).forEach(k => map[k.trim().toLowerCase().replace(/^﻿/, '')] = obj[k]);
+      for (const k of keys) { const v = map[k.trim().toLowerCase()]; if (v !== undefined) return v; }
+      return "";
+    }
       return "";
     }
 
     function buildMarkers(rows){
+      let built = 0;
       markersAll = rows
         .map(r => {
           const name = pick(r, ["Company Name","CompanyName","Name"]);
           const yRaw = pick(r, ["YearEstablished","Year","Established"]);
           const year = (typeof yRaw === 'number') ? yRaw : parseInt(String(yRaw).trim(), 10);
-          const lat  = parseFloat(pick(r, ["Latitude","geo.Latitude","Lat","lat"]).toString().replace(/,/g, '.'));
-          const lng  = parseFloat(pick(r, ["Longitude","geo.Longitude","Long","Lng","lon","lng"]).toString().replace(/,/g, '.'));
+          const latStr = String(pick(r, ["Latitude","geo.Latitude","Lat","lat"]).toString()).replace(/,/g, '.');
+          const lngStr = String(pick(r, ["Longitude","geo.Longitude","Long","Lng","lon","lng"]).toString()).replace(/,/g, '.');
+          const lat  = parseFloat(latStr);
+          const lng  = parseFloat(lngStr);
           const addr = pick(r, ["Address_1Line","MatchedAddress","Address","addr"]);
           if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-          const m = L.circleMarker([lat, lng], {
-            radius: 6, weight: 1, color: '#222', fillColor: colorByDecade(year), fillOpacity: 0.9
-          })
-          .bindTooltip(`${name} (est. ${Number.isFinite(year) ? year : '—'})`, {direction:'top', offset:[0,-2]})
-          .bindPopup(`<b>${name}</b><br/>Established: ${Number.isFinite(year) ? year : '—'}${addr ? '<br/>'+addr : ''}`);
+          built++;
+          const m = L.circleMarker([lat, lng], { radius: 6, weight: 1, color: '#222', fillColor: colorByDecade(year), fillOpacity: 0.9 })
+            .bindTooltip(`${name} (est. ${Number.isFinite(year) ? year : '—'})`, {direction:'top', offset:[0,-2]})
+            .bindPopup(`<b>${name}</b><br/>Established: ${Number.isFinite(year) ? year : '—'}${addr ? '<br/>'+addr : ''}`);
           m.__year = Number.isFinite(year) ? year : null;
           return m;
         })
@@ -185,6 +193,7 @@
       const max = years.length ? Math.max(...years) : new Date().getFullYear();
       $('yearSlider').min = min; $('yearSlider').max = max; $('yearSlider').value = min; $('yearLabel').textContent = min;
       render(min);
+      statusEl.textContent = `${statusEl.textContent} • Plotted ${built} point(s).`;
     }
 
     async function loadCSVFromServer(){
@@ -194,18 +203,16 @@
         const res = await fetch('data.csv?cb=' + Date.now(), { cache: 'no-store' });
         if(!res.ok) throw new Error('HTTP ' + res.status);
         const text = await res.text();
-        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-        if (parsed.errors && parsed.errors.length) {
-          console.warn(parsed.errors);
-        }
-        // Soft check: warn if key columns are missing
-        const headers = parsed.meta && parsed.meta.fields ? parsed.meta.fields : [];
-        const missing = REQUIRED_COLUMNS.filter(col => !headers.includes(col));
-        if (missing.length) {
-          console.warn('Missing expected columns:', missing.join(', '));
-        }
-        buildMarkers(parsed.data);
-        statusEl.textContent = `Loaded ${parsed.data.length} rows.`;
+        const parsed = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: h => (h || "").replace(/^﻿/, "").trim()
+      });
+        if (parsed.errors && parsed.errors.length) { console.warn(parsed.errors); }
+        const rows = parsed.data || [];
+        const n = rows.length;
+        buildMarkers(rows);
+        statusEl.textContent = `Loaded ${n} row(s).`;
       } catch (err) {
         console.error(err);
         statusEl.textContent = 'Could not load data.csv.';
@@ -218,13 +225,15 @@
       const file = e.target.files[0]; if(!file) return;
       statusEl.textContent = 'Parsing…';
       Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: res => {
-          buildMarkers(res.data);
-          statusEl.textContent = `Loaded ${res.data.length} rows from file.`;
-        }
-      });
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: h => (h || "").replace(/^﻿/, "").trim(),
+      complete: res => {
+        const rows = res.data || [];
+        buildMarkers(rows);
+        statusEl.textContent = `Loaded ${rows.length} row(s) from file.`;
+      }
+    });
     });
 
     $('btnReload').addEventListener('click', loadCSVFromServer);
