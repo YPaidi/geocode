@@ -5,77 +5,87 @@
   <title>Leaflet Timeline (Companies • CSV)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin></script>
   <!-- PapaParse (CSV parser) -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <style>
     html, body { height:100%; margin:0; }
     #map { height:100vh; }
+
     .topbar {
-      position: absolute; z-index: 1000; left: 10px; top: 10px;
-      background: white; padding: 8px 10px; border-radius: 8px; box-shadow:0 1px 4px rgba(0,0,0,.25);
-      font: 14px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      display:flex; gap:8px; align-items:center; flex-wrap: wrap;
+      position:absolute; z-index:1000; left:10px; top:10px;
+      background:#fff; padding:8px 10px; border-radius:8px;
+      box-shadow:0 1px 4px rgba(0,0,0,.25);
+      font:14px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      display:flex; gap:8px; align-items:center; flex-wrap:wrap;
     }
+    .hidden { display:none; }
+
     .timeline-control {
-      background: white; padding: 10px 12px; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);
-      font: 14px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; width: 340px;
+      background:#fff; padding:10px 12px; border-radius:10px;
+      box-shadow:0 1px 4px rgba(0,0,0,.25);
+      font:14px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; width:340px;
     }
     .timeline-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
     .timeline-row input[type="range"] { flex:1; }
     .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#f2f2f2; font-weight:600; }
-    .mode { margin-top:6px; font-size:12px; display:flex; gap:10px; }
-    .legend { background:white; padding:8px 10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,.25);
-      font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    .legend {
+      background:#fff; padding:8px 10px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,.25);
+      font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
     .legend-item { display:flex; align-items:center; gap:6px; margin-top:4px; }
     .legend-swatch { width:12px; height:12px; border-radius:50%; display:inline-block; }
-    .hidden { display:none; }
-    button, input[type="file"] { font: inherit; }
+    button, input[type="file"] { font:inherit; }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <strong>Dataset:</strong>
-    <code>data.csv</code>
-    <button id="btnReload" title="Reload data.csv">Reload</button>
+  <div class="topbar" id="topbar">
+    <strong>Dataset:</strong> <code id="dsName">data.csv</code>
+    <button id="btnReload" title="Reload CSV">Reload</button>
     <span id="status" aria-live="polite"></span>
-    <!-- Fallback loader (optional): will appear if fetch fails) -->
+    <!-- Local/dev fallback -->
     <input id="file" type="file" accept=".csv" class="hidden" />
   </div>
   <div id="map"></div>
 
   <script>
-    // ---------------------------
-    //  MAP BASE
-    // ---------------------------
+    // === Config =================================================================
+    // Absolute URL to your CSV (works in previews/embeds across domains):
+    const DATA_URL = 'https://ypaidi.github.io/geocode/data.csv';
+
+    // Debug UI (show topbar/status/file-chooser): add ?debug=1 to URL
+    const DEBUG = new URLSearchParams(location.search).has('debug');
+    const IS_LOCAL = (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+    const SHOW_TOPBAR = DEBUG || IS_LOCAL;  // public embeds keep it hidden
+    // ===========================================================================
+
+    // Map base
     const map = L.map('map', { zoomControl: true }).setView([4.5, 108], 6);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18, attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
     const layer = L.layerGroup().addTo(map);
 
-    const $ = (id) => document.getElementById(id);
+    const $ = id => document.getElementById(id);
+    const topbar = $('topbar');
     const statusEl = $('status');
-    // Show file picker only when running locally (file:// or localhost)
-    const IS_LOCAL = (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
-    const ENABLE_FILE_PICKER = IS_LOCAL;
+    const dsName = $('dsName');
+    if (!SHOW_TOPBAR) topbar.classList.add('hidden'); else dsName.textContent = DATA_URL;
 
     function colorByDecade(year){
       if(!year) return '#666';
       const d = Math.floor(year/10)*10;
-      if (d < 1970) return '#6366f1';
-      if (d < 1980) return '#22c55e';
-      if (d < 1990) return '#06b6d4';
-      if (d < 2000) return '#f59e0b';
-      if (d < 2010) return '#ef4444';
-      if (d < 2020) return '#a855f7';
-      return '#0ea5e9';
+      if (d < 1970) return '#6366f1';   // ≤1960s
+      if (d < 1980) return '#22c55e';   // 1970s
+      if (d < 1990) return '#06b6d4';   // 1980s
+      if (d < 2000) return '#f59e0b';   // 1990s
+      if (d < 2010) return '#ef4444';   // 2000s
+      if (d < 2020) return '#a855f7';   // 2010s
+      return '#0ea5e9';                 // 2020s+
     }
 
-    // ---------------------------
-    //  TIMELINE CONTROL
-    // ---------------------------
+    // Timeline control
     const TimelineControl = L.Control.extend({
       onAdd: function() {
         const div = L.DomUtil.create('div', 'timeline-control');
@@ -96,8 +106,7 @@
         return div;
       }
     });
-    const ctrl = new TimelineControl({ position: 'topright' });
-    map.addControl(ctrl);
+    map.addControl(new TimelineControl({ position: 'topright' }));
 
     const yearSlider = () => $('yearSlider');
     const yearLabel  = () => $('yearLabel');
@@ -107,7 +116,7 @@
 
     let markersAll = [];
     function render(year){
-      yearLabel().textContent = year;
+      if (yearLabel()) yearLabel().textContent = year;
       layer.clearLayers();
       const isCum = currentMode()==='cumulative';
       for(const m of markersAll){
@@ -117,21 +126,21 @@
       }
       if(layer.getLayers().length) map.fitBounds(layer.getBounds(), {padding:[20,20]});
     }
-    yearSlider().addEventListener('input', e => render(+e.target.value));
+    if (yearSlider()) yearSlider().addEventListener('input', e => render(+e.target.value));
     modeInputs().forEach(inp => inp.addEventListener('change', () => render(+yearSlider().value)));
 
     let playing=false, timer=null;
     function togglePlay(){
       if(!playing){
-        playing=true; btnPlay().textContent='⏸';
+        playing=true; if (btnPlay()) btnPlay().textContent='⏸';
         timer=setInterval(()=>{
           let y=+yearSlider().value;
           y = (y >= +yearSlider().max) ? +yearSlider().min : y+1;
           yearSlider().value=y; render(y);
         },800);
-      } else { playing=false; btnPlay().textContent='▶'; clearInterval(timer); }
+      } else { playing=false; if (btnPlay()) btnPlay().textContent='▶'; clearInterval(timer); }
     }
-    btnPlay().addEventListener('click', togglePlay);
+    if (btnPlay()) btnPlay().addEventListener('click', togglePlay);
 
     // Legend
     const legend = L.control({position:'bottomright'});
@@ -149,98 +158,87 @@
     };
     legend.addTo(map);
 
-    // ---------------------------
-    //  DATA LOADING (CSV)
-    // ---------------------------
-    const REQUIRED_COLUMNS = ["Company Name","YearEstablished","Latitude","Longitude"]; // soft-checked
-
+    // Flexible header lookup (handles BOM, case, spaces)
     function pick(obj, keys){
-      // Try exact names first
       for (const k of keys) { if (Object.prototype.hasOwnProperty.call(obj, k)) return obj[k]; }
-      // Then case-insensitive/trimmed; strip BOM if present
       const norm = {};
-      Object.keys(obj).forEach(k => { norm[k.trim().toLowerCase().replace(/^﻿/, '')] = obj[k]; });
+      Object.keys(obj).forEach(k => { norm[k.trim().toLowerCase().replace(/^\uFEFF/, '')] = obj[k]; });
       for (const k of keys) { const v = norm[k.trim().toLowerCase()]; if (v !== undefined) return v; }
       return "";
     }
 
     function buildMarkers(rows){
       let built = 0;
-      markersAll = rows
-        .map(r => {
-          const name = pick(r, ["Company Name","CompanyName","Name"]);
-          const yRaw = pick(r, ["YearEstablished","Year","Established"]);
-          const year = (typeof yRaw === 'number') ? yRaw : parseInt(String(yRaw).trim(), 10);
-          const latStr = String(pick(r, ["Latitude","geo.Latitude","Lat","lat"]).toString()).replace(/,/g, '.');
-          const lngStr = String(pick(r, ["Longitude","geo.Longitude","Long","Lng","lon","lng"]).toString()).replace(/,/g, '.');
-          const lat  = parseFloat(latStr);
-          const lng  = parseFloat(lngStr);
-          const addr = pick(r, ["Address_1Line","MatchedAddress","Address","addr"]);
-          if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-          built++;
-          const m = L.circleMarker([lat, lng], { radius: 6, weight: 1, color: '#222', fillColor: colorByDecade(year), fillOpacity: 0.9 })
-            .bindTooltip(`${name} (est. ${Number.isFinite(year) ? year : '—'})`, {direction:'top', offset:[0,-2]})
-            .bindPopup(`<b>${name}</b><br/>Established: ${Number.isFinite(year) ? year : '—'}${addr ? '<br/>'+addr : ''}`);
-          m.__year = Number.isFinite(year) ? year : null;
-          return m;
+      markersAll = rows.map(r => {
+        const name = pick(r, ["Company Name","CompanyName","Name"]);
+        const yRaw = pick(r, ["YearEstablished","Year","Established"]);
+        const year = (typeof yRaw === 'number') ? yRaw : parseInt(String(yRaw).trim(), 10);
+        const latStr = String(pick(r, ["Latitude","geo.Latitude","Lat","lat"])).replace(/,/g,'.');
+        const lngStr = String(pick(r, ["Longitude","geo.Longitude","Long","Lng","lon","lng"])).replace(/,/g,'.');
+        const lat = parseFloat(latStr), lng = parseFloat(lngStr);
+        const addr = pick(r, ["Address_1Line","MatchedAddress","Address","addr"]);
+        if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        built++;
+        const m = L.circleMarker([lat, lng], {
+          radius:6, weight:1, color:'#222', fillColor: colorByDecade(year), fillOpacity:0.9
         })
-        .filter(Boolean);
+        .bindTooltip(`${name} (est. ${Number.isFinite(year) ? year : '—'})`, {direction:'top', offset:[0,-2]})
+        .bindPopup(`<b>${name}</b><br/>Established: ${Number.isFinite(year) ? year : '—'}${addr ? '<br/>'+addr : ''}`);
+        m.__year = Number.isFinite(year) ? year : null;
+        return m;
+      }).filter(Boolean);
 
       const years = markersAll.map(m => m.__year).filter(y => y);
       const min = years.length ? Math.min(...years) : 1950;
       const max = years.length ? Math.max(...years) : new Date().getFullYear();
-      $('yearSlider').min = min; $('yearSlider').max = max; $('yearSlider').value = min; $('yearLabel').textContent = min;
+      if (yearSlider()) { yearSlider().min=min; yearSlider().max=max; yearSlider().value=min; }
+      if (yearLabel()) yearLabel().textContent = min;
       render(min);
-      statusEl.textContent = `${statusEl.textContent} • Plotted ${built} point(s).`;
+
+      if (SHOW_TOPBAR) statusEl.textContent = `Plotted ${built} point(s).`;
     }
 
     async function loadCSVFromServer(){
       try {
-        statusEl.textContent = 'Loading data.csv…';
-        const res = await fetch('data.csv?cb=' + Date.now(), { cache: 'no-store' });
-        if(!res.ok) throw new Error('HTTP ' + res.status);
+        if (SHOW_TOPBAR) statusEl.textContent = 'Loading CSV…';
+        const res = await fetch(DATA_URL + '?cb=' + Date.now(), { cache: 'no-store' });
+        if(!res.ok) throw new Error('HTTP ' + res.status + ' for ' + DATA_URL);
         const text = await res.text();
         const parsed = Papa.parse(text, {
-          header: true,
-          skipEmptyLines: true,
-          transformHeader: h => (h || '').replace(/^﻿/, '').trim()
+          header: true, skipEmptyLines: true,
+          transformHeader: h => (h || '').replace(/^\uFEFF/, '').trim()
         });
-        if (parsed.errors && parsed.errors.length) { console.warn(parsed.errors); }
         const rows = parsed.data || [];
-        const n = rows.length;
         buildMarkers(rows);
-        statusEl.textContent = `Loaded ${n} row(s).`;
+        if (SHOW_TOPBAR) statusEl.textContent = `Loaded ${rows.length} row(s).`;
       } catch (err) {
         console.error(err);
-        statusEl.textContent = 'Could not load data.csv.';
-        if (ENABLE_FILE_PICKER) $('file').classList.remove('hidden');
+        if (SHOW_TOPBAR) statusEl.textContent = 'Could not load CSV.';
+        if (IS_LOCAL) $('file').classList.remove('hidden'); // local dev fallback
       }
     }
 
+    // Local/dev: allow manual CSV pick
     $('file').addEventListener('change', e => {
       const file = e.target.files[0]; if(!file) return;
-      statusEl.textContent = 'Parsing…';
+      if (SHOW_TOPBAR) statusEl.textContent = 'Parsing…';
       Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: h => (h || '').replace(/^﻿/, '').trim(),
+        header:true, skipEmptyLines:true,
+        transformHeader: h => (h || '').replace(/^\uFEFF/, '').trim(),
         complete: res => {
           const rows = res.data || [];
           buildMarkers(rows);
-          statusEl.textContent = `Loaded ${rows.length} row(s) from file.`;
+          if (SHOW_TOPBAR) statusEl.textContent = `Loaded ${rows.length} row(s) from file.`;
         }
       });
     });
 
+    // Wire reload button (only visible in debug/local)
     $('btnReload').addEventListener('click', loadCSVFromServer);
 
     // Initial load
-    if (ENABLE_FILE_PICKER && location.protocol === 'file:') {
-      statusEl.textContent = 'Opened from file:// — use “Choose File” or run a local server.';
-      $('file').classList.remove('hidden');
-    } else {
-      loadCSVFromServer();
-    }
+    loadCSVFromServer();
   </script>
 </body>
 </html>
