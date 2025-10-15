@@ -155,13 +155,12 @@
     const REQUIRED_COLUMNS = ["Company Name","YearEstablished","Latitude","Longitude"]; // soft-checked
 
     function pick(obj, keys){
-      // first try direct names
+      // Try exact names first
       for (const k of keys) { if (Object.prototype.hasOwnProperty.call(obj, k)) return obj[k]; }
-      // then try case-insensitive / trimmed header names (handles Excel BOM/extra spaces)
-      const map = {}; Object.keys(obj).forEach(k => map[k.trim().toLowerCase().replace(/^﻿/, '')] = obj[k]);
-      for (const k of keys) { const v = map[k.trim().toLowerCase()]; if (v !== undefined) return v; }
-      return "";
-    }
+      // Then case-insensitive/trimmed; strip BOM if present
+      const norm = {};
+      Object.keys(obj).forEach(k => { norm[k.trim().toLowerCase().replace(/^﻿/, '')] = obj[k]; });
+      for (const k of keys) { const v = norm[k.trim().toLowerCase()]; if (v !== undefined) return v; }
       return "";
     }
 
@@ -187,7 +186,6 @@
         })
         .filter(Boolean);
 
-      // Slider bounds
       const years = markersAll.map(m => m.__year).filter(y => y);
       const min = years.length ? Math.min(...years) : 1950;
       const max = years.length ? Math.max(...years) : new Date().getFullYear();
@@ -199,15 +197,14 @@
     async function loadCSVFromServer(){
       try {
         statusEl.textContent = 'Loading data.csv…';
-        // Bypass caches during iteration; remove the cache-buster for production if desired
         const res = await fetch('data.csv?cb=' + Date.now(), { cache: 'no-store' });
         if(!res.ok) throw new Error('HTTP ' + res.status);
         const text = await res.text();
         const parsed = Papa.parse(text, {
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: h => (h || "").replace(/^﻿/, "").trim()
-      });
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: h => (h || '').replace(/^﻿/, '').trim()
+        });
         if (parsed.errors && parsed.errors.length) { console.warn(parsed.errors); }
         const rows = parsed.data || [];
         const n = rows.length;
@@ -220,20 +217,19 @@
       }
     }
 
-    // Fallback: manual CSV chooser
     $('file').addEventListener('change', e => {
       const file = e.target.files[0]; if(!file) return;
       statusEl.textContent = 'Parsing…';
       Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: h => (h || "").replace(/^﻿/, "").trim(),
-      complete: res => {
-        const rows = res.data || [];
-        buildMarkers(rows);
-        statusEl.textContent = `Loaded ${rows.length} row(s) from file.`;
-      }
-    });
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: h => (h || '').replace(/^﻿/, '').trim(),
+        complete: res => {
+          const rows = res.data || [];
+          buildMarkers(rows);
+          statusEl.textContent = `Loaded ${rows.length} row(s) from file.`;
+        }
+      });
     });
 
     $('btnReload').addEventListener('click', loadCSVFromServer);
@@ -244,7 +240,6 @@
       $('file').classList.remove('hidden');
     } else {
       loadCSVFromServer();
-    }
     }
   </script>
 </body>
